@@ -1,0 +1,57 @@
+name: Is members.spaamfaa.org up?
+
+# AN ALARM FOR WHEN THE SITE IS DOWN. Every 30 minutes this asks for the
+# sign-in page and the home page. If either does not answer properly, after
+# three tries a minute apart, the run fails, and GitHub emails Brian, because a
+# failed scheduled run is mailed to the person who last changed its schedule.
+#
+# WHY IT LIVES HERE. It started in the private spaamfaa-archive-poc repository
+# on 6 October 2026 every 15 minutes. Actions minutes are free only in public
+# repositories, and each run bills at least one minute, so that alarm alone
+# could use about 2,900 of the 2,000 minutes a month the account includes. It
+# used up the allowance in October. Moved here on 28 October 2026, at every 30
+# minutes. This repository is public on purpose: it holds no secrets and no
+# client data, only the public web address being checked.
+#
+# GitHub runs scheduled jobs when it can, so a check may come a few minutes
+# late at busy times. An outage longer than about 45 minutes will be caught.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spaamfaa-members
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: members.spaamfaa.org answers
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      # A 200 is not enough on its own. Vercel's bot protection can answer with
+      # its own "Security Checkpoint" page, also a 200, which says nothing about
+      # whether the site itself is up (found 6 October 2026). So the page must
+      # contain SPAAMFAA. A checkpoint page is reported as a warning and does not
+      # fail the run: it means GitHub's machine was challenged, not that the site
+      # is down.
+      - name: Sign-in page and home page
+        run: |
+          fail=0
+          for url in https://members.spaamfaa.org/login https://members.spaamfaa.org/; do
+            ok=0
+            for try in 1 2 3; do
+              code=$(curl -s -o page.html -w "%{http_code}" --max-time 20 -L -A "SPAAMFAA uptime check (GitHub Actions)" "$url" || echo 000)
+              if grep -q "Security Checkpoint" page.html 2>/dev/null; then echo "::warning::$url answered with Vercel's bot checkpoint; cannot tell, not failing"; ok=1; break; fi
+              if [ "$code" = "200" ] && grep -q "SPAAMFAA" page.html; then ok=1; break; fi
+              echo "Try $try: $url answered $code"
+              sleep 60
+            done
+            if [ "$ok" = "1" ]; then echo "Checked: $url"; else echo "::error::$url is not answering properly (last code $code)"; fail=1; fi
+          done
+          exit $fail
